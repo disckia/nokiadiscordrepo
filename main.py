@@ -81,40 +81,45 @@ def receive_sms():
     if not content or " " not in content:
         return "Invalid format. Use: target message", 400
 
-    # Split on the first space: first word = target
+    # Split on first space
     target, message = content.split(" ", 1)
-    target = target.lstrip("@")  # remove optional @ if present
+    target = target.lstrip("@")  # Allow optional @ prefix
 
-    # Get map from environment
+    # Load map from env and resolve target
     number_map = json.loads(os.getenv("NUMBER_MAP", "{}"))
-    resolved = number_map.get(target, target)  # fall back to original
+    resolved = number_map.get(target, target)  # fall back to direct use
 
     async def send_discord():
         await discord_ready.wait()
 
-        # If numeric, treat as ID
+        # If resolved is numeric → treat as ID
         if resolved.isdigit():
-            user_or_channel = client.get_user(int(resolved)) or client.get_channel(int(resolved))
-            if user_or_channel:
+            try:
+                obj = client.get_channel(int(resolved))
+                if obj:
+                    await obj.send(message)
+                    print(f"📤 Sent to Channel ID {resolved}: {message}")
+                    return
+                # If not a channel, maybe it's a user
+                user = await client.fetch_user(int(resolved))
+                await user.send(message)
+                print(f"📤 Sent DM to User ID {resolved}: {message}")
+                return
+            except Exception as e:
+                print(f"❌ Failed to send to ID {resolved}: {e}")
+                return
+
+        # If resolved is not an ID, match by username
+        for user in client.users:
+            if user.name.lower() == resolved.lower():
                 try:
-                    await user_or_channel.send(message)
-                    print(f"📤 Sent to ID {resolved}: {message}")
+                    await user.send(message)
+                    print(f"📤 Sent DM to {user.name}: {message}")
                     return
                 except Exception as e:
-                    print(f"❌ Failed to send to ID {resolved}: {e}")
-            else:
-                print(f"❌ No user or channel found with ID {resolved}")
-        else:
-            # Fall back to username match
-            for user in client.users:
-                if user.name.lower() == resolved.lower():
-                    try:
-                        await user.send(message)
-                        print(f"📤 Sent DM to {user.name}: {message}")
-                        return
-                    except Exception as e:
-                        print(f"❌ Failed to DM {user.name}: {e}")
-            print(f"❌ User '{resolved}' not found")
+                    print(f"❌ Failed to DM {user.name}: {e}")
+                    return
+        print(f"❌ User '{resolved}' not found")
 
     loop.create_task(send_discord())
     return "Message accepted", 200
