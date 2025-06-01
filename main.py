@@ -70,34 +70,32 @@ async def on_message(message):
 async def send_to_discord(resolved, msg):
     await discord_ready.wait()
     try:
-        # If resolved is a digit string, treat as ID
         if resolved.isdigit():
-            # Try channel by ID
             channel = client.get_channel(int(resolved))
-            if channel:
+            if channel and isinstance(channel, (discord.TextChannel, discord.Thread)):
                 await channel.send(msg)
                 print(f"📤 Sent to channel #{channel.name} (ID: {resolved})", flush=True)
                 return
             
-            # Else try DM user by ID
-            user = await client.fetch_user(int(resolved))
-            await user.send(msg)
-            print(f"📤 Sent DM to user {user.name} (ID: {resolved})", flush=True)
-            return
-        
-        # Otherwise, treat resolved as a channel name; search all guilds
-        for guild in client.guilds:
-            channel = discord.utils.get(guild.channels, name=resolved)
-            if channel:
-                await channel.send(msg)
-                print(f"📤 Sent to channel #{channel.name} (by name)", flush=True)
+            if channel is None:
+                # Try DM user by ID
+                user = await client.fetch_user(int(resolved))
+                await user.send(msg)
+                print(f"📤 Sent DM to user {user.name} (ID: {resolved})", flush=True)
                 return
+
+        else:
+            for guild in client.guilds:
+                channel = discord.utils.get(guild.channels, name=resolved)
+                if channel and isinstance(channel, (discord.TextChannel, discord.Thread)):
+                    await channel.send(msg)
+                    print(f"📤 Sent to channel #{channel.name} (by name)", flush=True)
+                    return
         
-        print(f"❌ Could not find channel or user: {resolved}", flush=True)
+        print(f"❌ Could not find a suitable channel or user: {resolved}", flush=True)
 
     except Exception as e:
         print(f"❌ Error sending to Discord: {e}", flush=True)
-
 
 # Flask route
 @app.route("/incoming", methods=["POST"])
