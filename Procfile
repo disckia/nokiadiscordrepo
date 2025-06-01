@@ -1,0 +1,1 @@
+web: python discord_sms_gateway.py
