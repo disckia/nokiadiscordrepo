@@ -136,11 +136,14 @@ def receive_sms():
 
 # === Threading ===
 def start_flask():
-    app.run(host='0.0.0.0', port=5000)
-
+    port = int(os.environ.get("PORT", 5000))  # Render uses env PORT
+    app.run(host="0.0.0.0", port=port)
 def start_discord():
-    loop.run_until_complete(client.start(BOT_TOKEN))
+    try:
+        print("🟡 Starting Discord bot...")
+        loop.run_until_complete(client.start(BOT_TOKEN))
+    except Exception as e:
+        print(f"❌ Discord failed to start: {e}")
 
-if __name__ == "__main__":
-    threading.Thread(target=start_flask).start()
-    start_discord()
+threading.Thread(target=start_flask).start()
+start_discord()
