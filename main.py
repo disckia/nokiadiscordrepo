@@ -70,25 +70,36 @@ async def on_message(message):
 async def send_to_discord(resolved, msg):
     await discord_ready.wait()
     try:
+        # Try sending to a Discord channel by ID
         if resolved.isdigit():
-            obj = client.get_channel(int(resolved))
-            if obj:
-                await obj.send(msg)
-                print(f"📤 Sent to channel {resolved}")
+            channel = client.get_channel(int(resolved))
+            if channel:
+                await channel.send(msg)
+                print(f"📤 Sent to channel {channel.name} ({resolved})")
                 return
-            user = await client.fetch_user(int(resolved))
+            
+            # Try sending DM by user ID
+            try:
+                user = await client.fetch_user(int(resolved))
+                await user.send(msg)
+                print(f"📤 Sent DM to user {user.name} ({resolved})")
+                return
+            except discord.NotFound:
+                print(f"❌ User ID not found: {resolved}")
+                return
+        
+        # Try resolving a username (case-insensitive)
+        matched_users = [u for u in client.users if u.name.lower() == resolved.lower()]
+        if matched_users:
+            user = matched_users[0]
             await user.send(msg)
-            print(f"📤 Sent DM to user {resolved}")
+            print(f"📤 Sent DM to user {user.name}")
             return
-        else:
-            for user in client.users:
-                if user.name.lower() == resolved.lower():
-                    await user.send(msg)
-                    print(f"📤 Sent DM to user {user.name}")
-                    return
-            print(f"❌ No user found: {resolved}")
+
+        print(f"❌ No matching user or channel for: {resolved}")
+    
     except Exception as e:
-        print(f"❌ Error sending message: {e}")
+        print(f"❌ Error in send_to_discord: {e}")
 
 # Flask route
 @app.route("/incoming", methods=["POST"])
