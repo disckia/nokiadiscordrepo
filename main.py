@@ -6,6 +6,7 @@ from flask import Flask, request
 from dotenv import load_dotenv
 import asyncio
 from threading import Thread
+
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
 
@@ -65,6 +66,30 @@ async def on_message(message):
         content = f"[#{message.channel.name}] {message.author.name}: {message.content}"
     send_sms(content)
 
+# Separated Discord sender function
+async def send_to_discord(resolved, msg):
+    await discord_ready.wait()
+    try:
+        if resolved.isdigit():
+            obj = client.get_channel(int(resolved))
+            if obj:
+                await obj.send(msg)
+                print(f"📤 Sent to channel {resolved}")
+                return
+            user = await client.fetch_user(int(resolved))
+            await user.send(msg)
+            print(f"📤 Sent DM to user {resolved}")
+            return
+        else:
+            for user in client.users:
+                if user.name.lower() == resolved.lower():
+                    await user.send(msg)
+                    print(f"📤 Sent DM to user {user.name}")
+                    return
+            print(f"❌ No user found: {resolved}")
+    except Exception as e:
+        print(f"❌ Error sending message: {e}")
+
 # Flask route
 @app.route("/incoming", methods=["POST"])
 def receive_sms():
@@ -82,30 +107,7 @@ def receive_sms():
     target = target.lstrip("@")
     resolved = NUMBER_MAP.get(target, target)
 
-    async def send():
-        await discord_ready.wait()
-        try:
-            if resolved.isdigit():
-                obj = client.get_channel(int(resolved))
-                if obj:
-                    await obj.send(msg)
-                    print(f"📤 Sent to channel {resolved}")
-                    return
-                user = await client.fetch_user(int(resolved))
-                await user.send(msg)
-                print(f"📤 Sent DM to user {resolved}")
-                return
-            else:
-                for user in client.users:
-                    if user.name.lower() == resolved.lower():
-                        await user.send(msg)
-                        print(f"📤 Sent DM to user {user.name}")
-                        return
-                print(f"❌ No user found: {resolved}")
-        except Exception as e:
-            print(f"❌ Error sending message: {e}")
-
-    asyncio.run_coroutine_threadsafe(send(), client.loop)
+    asyncio.run_coroutine_threadsafe(send_to_discord(resolved, msg), client.loop)
     return "Message accepted", 200
 
 # Start Flask in thread
