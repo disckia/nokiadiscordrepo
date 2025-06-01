@@ -70,30 +70,32 @@ async def on_message(message):
 async def send_to_discord(resolved, msg):
     await discord_ready.wait()
     try:
-        # resolved is always from NUMBER_MAP: can be a channel ID or user ID (both as string)
+        # If resolved is digits, treat as channel/user ID
         if resolved.isdigit():
-            # Try channel first
             channel = client.get_channel(int(resolved))
             if channel:
                 await channel.send(msg)
                 print(f"📤 Sent to channel #{channel.name} ({resolved})")
                 return
             
-            # Then try DM via user ID
-            try:
-                user = await client.fetch_user(int(resolved))
-                await user.send(msg)
-                print(f"📤 Sent DM to user {user.name} ({resolved})")
+            user = await client.fetch_user(int(resolved))
+            await user.send(msg)
+            print(f"📤 Sent DM to user {user.name} ({resolved})")
+            return
+        
+        # Otherwise, resolved is channel name (string)
+        # Search guild channels for a match by name (case-insensitive)
+        for guild in client.guilds:
+            channel = discord.utils.get(guild.channels, name=resolved)
+            if channel:
+                await channel.send(msg)
+                print(f"📤 Sent to channel #{channel.name} (by name)")
                 return
-            except discord.NotFound:
-                print(f"❌ User ID not found: {resolved}")
-                return
-
-        print(f"❌ Invalid target: ID '{resolved}' is not a digit")
+        
+        print(f"❌ Channel '{resolved}' not found in any guild")
     
     except Exception as e:
         print(f"❌ Error sending message to Discord: {e}")
-
 
 # Flask route
 @app.route("/incoming", methods=["POST"])
