@@ -71,58 +71,68 @@ async def on_message(message):
 # === SMS → Discord ===
 @app.route("/incoming", methods=["POST"])
 def receive_sms():
-    data = request.form
-    from_number = data.get("from_number")
-    content = data.get("content")
+    try:
+        data = request.form
+        print("Received data:", data)
+        from_number = data.get("from_number")
+        content = data.get("content")
 
-    if from_number not in ALLOWED_NUMBERS:
-        return "Number not allowed", 403
+        if from_number not in ALLOWED_NUMBERS:
+            print(f"Rejected from number: {from_number}")
+            return "Number not allowed", 403
 
-    if not content or " " not in content:
-        return "Invalid format. Use: target message", 400
+        if not content or " " not in content:
+            print("Invalid content format")
+            return "Invalid format. Use: target message", 400
 
-    # Split on first space
-    target, message = content.split(" ", 1)
-    target = target.lstrip("@")  # Allow optional @ prefix
+        # Split on first space
+        target, message = content.split(" ", 1)
+        target = target.lstrip("@")  # Allow optional @ prefix
 
-    # Load map from env and resolve target
-    number_map = json.loads(os.getenv("NUMBER_MAP", "{}"))
-    resolved = number_map.get(target, target)  # fall back to direct use
+        # Load map from env and resolve target
+        number_map = json.loads(os.getenv("NUMBER_MAP", "{}"))
+        resolved = number_map.get(target, target)  # fall back to direct use
 
-    async def send_discord():
-        await discord_ready.wait()
+        async def send_discord():
+            await discord_ready.wait()
 
-        # If resolved is numeric → treat as ID
-        if resolved.isdigit():
-            try:
-                obj = client.get_channel(int(resolved))
-                if obj:
-                    await obj.send(message)
-                    print(f"📤 Sent to Channel ID {resolved}: {message}")
-                    return
-                # If not a channel, maybe it's a user
-                user = await client.fetch_user(int(resolved))
-                await user.send(message)
-                print(f"📤 Sent DM to User ID {resolved}: {message}")
-                return
-            except Exception as e:
-                print(f"❌ Failed to send to ID {resolved}: {e}")
-                return
-
-        # If resolved is not an ID, match by username
-        for user in client.users:
-            if user.name.lower() == resolved.lower():
+            # If resolved is numeric → treat as ID
+            if resolved.isdigit():
                 try:
+                    obj = client.get_channel(int(resolved))
+                    if obj:
+                        await obj.send(message)
+                        print(f"📤 Sent to Channel ID {resolved}: {message}")
+                        return
+                    # If not a channel, maybe it's a user
+                    user = await client.fetch_user(int(resolved))
                     await user.send(message)
-                    print(f"📤 Sent DM to {user.name}: {message}")
+                    print(f"📤 Sent DM to User ID {resolved}: {message}")
                     return
                 except Exception as e:
-                    print(f"❌ Failed to DM {user.name}: {e}")
+                    print(f"❌ Failed to send to ID {resolved}: {e}")
                     return
-        print(f"❌ User '{resolved}' not found")
 
-    loop.create_task(send_discord())
-    return "Message accepted", 200
+            # If resolved is not an ID, match by username
+            for user in client.users:
+                if user.name.lower() == resolved.lower():
+                    try:
+                        await user.send(message)
+                        print(f"📤 Sent DM to {user.name}: {message}")
+                        return
+                    except Exception as e:
+                        print(f"❌ Failed to DM {user.name}: {e}")
+                        return
+            print(f"❌ User '{resolved}' not found")
+
+        loop.create_task(send_discord())
+        return "Message accepted", 200
+
+    except Exception as e:
+        import traceback
+        print(f"Exception in /incoming: {e}")
+        traceback.print_exc()
+        return "Internal Server Error", 500
 
 # === Threading ===
 def start_flask():
