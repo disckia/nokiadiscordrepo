@@ -36,18 +36,18 @@ client = discord.Client(intents=intents)
 discord_ready = asyncio.Event()
 
 # Send SMS
-def send_sms(message):
+def send_sms(message, to_number=TARGET_PHONE_NUMBER):
     url = f"https://api.telerivet.com/v1/projects/{TELERIVET_PROJECT_ID}/messages/send"
     payload = {
         "phone_id": TELERIVET_PHONE_ID,
-        "to_number": TARGET_PHONE_NUMBER,
+        "to_number": to_number,
         "content": message
     }
     response = requests.post(url, auth=(TELERIVET_API_KEY, ""), json=payload)
     if response.status_code != 200:
-        print(f"❌ Failed to send SMS: {response.status_code} - {response.text}")
+        print(f"❌ SMS send failed: {response.status_code} - {response.text}", flush=True)
     else:
-        print(f"📤 SMS sent: {message}")
+        print(f"📤 SMS sent: {message}", flush=True)
 
 # Discord events
 @client.event
@@ -118,7 +118,7 @@ def start_discord():
         print("🟡 Starting Discord bot...")
         loop.run_until_complete(client.start(BOT_TOKEN))
     except Exception as e:
-        print(f"❌ Discord bot failed to start: {e}")
+        print(f"❌ Discord bot failed to start: {e}", flush=True)
 
 # Start everything
 if __name__ == "__main__":
