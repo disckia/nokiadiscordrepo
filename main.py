@@ -6,6 +6,8 @@ from flask import Flask, request
 from dotenv import load_dotenv
 import asyncio
 from threading import Thread
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
 
 # Load env vars
 load_dotenv()
@@ -110,6 +112,13 @@ def receive_sms():
 def start_flask():
     port = int(os.getenv("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
+
+def start_discord():
+    try:
+        print("🟡 Starting Discord bot...")
+        loop.run_until_complete(client.start(BOT_TOKEN))
+    except Exception as e:
+        print(f"❌ Discord bot failed to start: {e}")
 
 # Start everything
 if __name__ == "__main__":
