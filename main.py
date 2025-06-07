@@ -5,7 +5,7 @@ import requests
 from flask import Flask, request
 from dotenv import load_dotenv
 import asyncio
-from threading import Thread
+from threading import Thread, Lock
 
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
@@ -13,11 +13,31 @@ asyncio.set_event_loop(loop)
 # Load env vars
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-TELERIVET_API_KEY = os.getenv("TELERIVET_API_KEY")
-TELERIVET_PROJECT_ID = os.getenv("TELERIVET_PROJECT_ID")
-TELERIVET_PHONE_ID = os.getenv("TELERIVET_PHONE_ID")
 TARGET_PHONE_NUMBER = os.getenv("TARGET_PHONE_NUMBER")
 ALLOWED_NUMBERS = os.getenv("ALLOWED_NUMBERS", "").split(",")
+
+# Dual Telerivet Gateway Setup
+GATEWAYS = [
+    {
+        "API_KEY": os.getenv("TELERIVET_API_KEY_1"),
+        "PROJECT_ID": os.getenv("TELERIVET_PROJECT_ID_1"),
+        "PHONE_ID": os.getenv("TELERIVET_PHONE_ID_1")
+    },
+    {
+        "API_KEY": os.getenv("TELERIVET_API_KEY_2"),
+        "PROJECT_ID": os.getenv("TELERIVET_PROJECT_ID_2"),
+        "PHONE_ID": os.getenv("TELERIVET_PHONE_ID_2")
+    }
+]
+gateway_index = 0
+gateway_lock = Lock()
+
+def pick_gateway():
+    global gateway_index
+    with gateway_lock:
+        gw = GATEWAYS[gateway_index]
+        gateway_index = (gateway_index + 1) % len(GATEWAYS)
+    return gw
 
 # Safe-load mapping
 try:
@@ -38,17 +58,18 @@ discord_ready = asyncio.Event()
 
 # Send SMS
 def send_sms(message, to_number=TARGET_PHONE_NUMBER):
-    url = f"https://api.telerivet.com/v1/projects/{TELERIVET_PROJECT_ID}/messages/send"
+    gateway = pick_gateway()
+    url = f"https://api.telerivet.com/v1/projects/{gateway['PROJECT_ID']}/messages/send"
     payload = {
-        "phone_id": TELERIVET_PHONE_ID,
+        "phone_id": gateway["PHONE_ID"],
         "to_number": to_number,
         "content": message
     }
-    response = requests.post(url, auth=(TELERIVET_API_KEY, ""), json=payload)
+    response = requests.post(url, auth=(gateway["API_KEY"], ""), json=payload)
     if response.status_code != 200:
         print(f"❌ SMS send failed: {response.status_code} - {response.text}", flush=True)
     else:
-        print(f"📤 SMS sent: {message}", flush=True)
+        print(f"📤 SMS sent via Gateway {GATEWAYS.index(gateway)+1}: {message}", flush=True)
 
 # Discord events
 @client.event
@@ -76,14 +97,11 @@ async def send_to_discord(resolved, msg):
                 await channel.send(msg)
                 print(f"📤 Sent to channel #{channel.name} (ID: {resolved})", flush=True)
                 return
-            
-            if channel is None:
-                # Try DM user by ID
-                user = await client.fetch_user(int(resolved))
-                await user.send(msg)
-                print(f"📤 Sent DM to user {user.name} (ID: {resolved})", flush=True)
-                return
 
+            user = await client.fetch_user(int(resolved))
+            await user.send(msg)
+            print(f"📤 Sent DM to user {user.name} (ID: {resolved})", flush=True)
+            return
         else:
             for guild in client.guilds:
                 channel = discord.utils.get(guild.channels, name=resolved)
@@ -91,7 +109,7 @@ async def send_to_discord(resolved, msg):
                     await channel.send(msg)
                     print(f"📤 Sent to channel #{channel.name} (by name)", flush=True)
                     return
-        
+
         print(f"❌ Could not find a suitable channel or user: {resolved}", flush=True)
 
     except Exception as e:
