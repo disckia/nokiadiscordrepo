@@ -2,44 +2,21 @@ import os
 import json
 import discord
 import requests
-from flask import Flask, request
+from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 import asyncio
-from threading import Thread, Lock
+from threading import Thread
 
+# Setup event loop
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
 
-# Load env vars
+# Load environment variables
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-TARGET_PHONE_NUMBER = os.getenv("TARGET_PHONE_NUMBER")
 ALLOWED_NUMBERS = os.getenv("ALLOWED_NUMBERS", "").split(",")
 
-# Dual Telerivet Gateway Setup
-GATEWAYS = [
-    {
-        "API_KEY": os.getenv("TELERIVET_API_KEY_1"),
-        "PROJECT_ID": os.getenv("TELERIVET_PROJECT_ID_1"),
-        "PHONE_ID": os.getenv("TELERIVET_PHONE_ID_1")
-    },
-    {
-        "API_KEY": os.getenv("TELERIVET_API_KEY_2"),
-        "PROJECT_ID": os.getenv("TELERIVET_PROJECT_ID_2"),
-        "PHONE_ID": os.getenv("TELERIVET_PHONE_ID_2")
-    }
-]
-gateway_index = 0
-gateway_lock = Lock()
-
-def pick_gateway():
-    global gateway_index
-    with gateway_lock:
-        gw = GATEWAYS[gateway_index]
-        gateway_index = (gateway_index + 1) % len(GATEWAYS)
-    return gw
-
-# Safe-load mapping
+# Optional: Map user-friendly keys to Discord IDs
 try:
     NUMBER_MAP = json.loads(os.getenv("NUMBER_MAP", "{}"))
 except Exception as e:
@@ -49,29 +26,14 @@ except Exception as e:
 # Flask app
 app = Flask(__name__)
 
-# Discord bot
+# Discord client setup
 intents = discord.Intents.default()
 intents.message_content = True
 intents.dm_messages = True
 client = discord.Client(intents=intents)
 discord_ready = asyncio.Event()
 
-# Send SMS
-def send_sms(message, to_number=TARGET_PHONE_NUMBER):
-    gateway = pick_gateway()
-    url = f"https://api.telerivet.com/v1/projects/{gateway['PROJECT_ID']}/messages/send"
-    payload = {
-        "phone_id": gateway["PHONE_ID"],
-        "to_number": to_number,
-        "content": message
-    }
-    response = requests.post(url, auth=(gateway["API_KEY"], ""), json=payload)
-    if response.status_code != 200:
-        print(f"❌ SMS send failed: {response.status_code} - {response.text}", flush=True)
-    else:
-        print(f"📤 SMS sent via Gateway {GATEWAYS.index(gateway)+1}: {message}", flush=True)
-
-# Discord events
+# Discord bot events
 @client.event
 async def on_ready():
     print(f"✅ Discord bot logged in as {client.user}")
@@ -85,7 +47,7 @@ async def on_message(message):
         content = f"[DM] {message.author.name}: {message.content}"
     else:
         content = f"[#{message.channel.name}] {message.author.name}: {message.content}"
-    send_sms(content)
+    print(f"📤 Would send SMS: {content}")  # Sending is optional now
 
 # Separated Discord sender function
 async def send_to_discord(resolved, msg):
@@ -93,7 +55,7 @@ async def send_to_discord(resolved, msg):
     try:
         if resolved.isdigit():
             channel = client.get_channel(int(resolved))
-            if channel and isinstance(channel, (discord.TextChannel, discord.Thread)):
+            if channel:
                 await channel.send(msg)
                 print(f"📤 Sent to channel #{channel.name} (ID: {resolved})", flush=True)
                 return
@@ -105,7 +67,7 @@ async def send_to_discord(resolved, msg):
         else:
             for guild in client.guilds:
                 channel = discord.utils.get(guild.channels, name=resolved)
-                if channel and isinstance(channel, (discord.TextChannel, discord.Thread)):
+                if channel:
                     await channel.send(msg)
                     print(f"📤 Sent to channel #{channel.name} (by name)", flush=True)
                     return
@@ -115,39 +77,48 @@ async def send_to_discord(resolved, msg):
     except Exception as e:
         print(f"❌ Error sending to Discord: {e}", flush=True)
 
-# Flask route
+# Incoming webhook (Android app calls this)
 @app.route("/incoming", methods=["POST"])
 def receive_sms():
-    data = request.form
-    from_number = data.get("from_number")
-    content = data.get("content")
+    try:
+        data = request.get_json()
+        from_number = data.get("from")
+        content = data.get("message")
 
-    if from_number not in ALLOWED_NUMBERS:
-        return "Forbidden", 403
+        if not from_number or not content:
+            return jsonify({"error": "Missing fields"}), 400
 
-    if not content or " " not in content:
-        return "Invalid format. Use: target message", 400
+        if from_number not in ALLOWED_NUMBERS:
+            return jsonify({"error": "Forbidden"}), 403
 
-    target, msg = content.split(" ", 1)
-    target = target.lstrip("@")
-    resolved = NUMBER_MAP.get(target, target)
+        if " " not in content:
+            return jsonify({"error": "Invalid format. Use: target message"}), 400
 
-    asyncio.run_coroutine_threadsafe(send_to_discord(resolved, msg), client.loop)
-    return "Message accepted", 200
+        target, msg = content.split(" ", 1)
+        target = target.lstrip("@")
+        resolved = NUMBER_MAP.get(target, target)
 
-# Start Flask in thread
+        asyncio.run_coroutine_threadsafe(send_to_discord(resolved, msg), client.loop)
+        return jsonify({"status": "Message accepted"}), 200
+
+    except Exception as e:
+        print(f"❌ Error in /incoming: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# Start Flask in a thread
 def start_flask():
     port = int(os.getenv("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host="0.0.0.0", port=port)
 
+# Start Discord bot
 def start_discord():
     try:
         print("🟡 Starting Discord bot...")
         loop.run_until_complete(client.start(BOT_TOKEN))
     except Exception as e:
-        print(f"❌ Discord bot failed to start: {e}", flush=True)
+        print(f"❌ Discord bot failed to start: {e}")
 
-# Start everything
+# Launch
 if __name__ == "__main__":
     Thread(target=start_flask).start()
     client.run(BOT_TOKEN)
