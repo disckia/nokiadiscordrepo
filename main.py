@@ -2,6 +2,7 @@ import os
 import json
 import discord
 import requests
+import uuid
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 import asyncio
@@ -39,6 +40,23 @@ discord_ready = asyncio.Event()
 # Outgoing message queue for SMSSync
 outgoing_sms_queue = deque()
 
+# SMSSync Incoming Payload Format:
+"""
+SMSSync ➡️ Server (POST to /incoming)
+
+Expected `request.form` structure:
+{
+    "secret": "your_webhook_secret",         # Required and should match what you set in the app
+    "from": "+1234567890",                   # Sender's number (the one who sent SMS)
+    "message": "target_name your message",   # SMS content (parsed to Discord)
+    "sent_timestamp": "1623345600000",       # When the sender sent the SMS (epoch millis)
+    "timestamp": "1623345600123",            # When SMSSync received the SMS (epoch millis)
+    "sent_to": "+19876543210",               # Your Android's SIM number
+    "device_id": "my_android_device_id",     # Optional identifier for device
+    "message_id": "123456789"                # Internal SMSSync message ID
+}
+"""
+
 # Discord events
 @client.event
 async def on_ready():
@@ -60,7 +78,8 @@ async def on_message(message):
         print(f"📥 Queuing SMS to {TARGET_PHONE_NUMBER}: {content}")
         outgoing_sms_queue.append({
             "to": TARGET_PHONE_NUMBER,
-            "message": content
+            "message": content,
+            "uuid": str(uuid.uuid4())
         })
     else:
         print("❌ TARGET_PHONE_NUMBER not set.")
@@ -94,18 +113,49 @@ def receive_sms():
 
     return ("Message accepted", 200)
 
-# SMSSync fetches messages to send to Nokia
+# SMSSync Fetch Format:
+"""
+Server ➡️ SMSSync (SMSSync sends PUT to /fetch)
+
+Your server must respond with:
+{
+    "payload": {
+        "success": true,
+        "task": [
+            {
+                "to": "+1234567890",          # Recipient phone number
+                "message": "Hello World",     # Content to send via SMS
+                "uuid": "msg-uuid-123"        # Unique ID for tracking status
+            },
+            ...
+        ]
+    }
+}
+"""
+
 @app.route("/fetch", methods=["PUT"])
 def fetch_messages():
     global outgoing_sms_queue
     if not outgoing_sms_queue:
         return jsonify({"payload": {"success": True, "task": []}})
 
-    messages = outgoing_sms_queue[:]
-    outgoing_sms_queue = []  # Clear after copying
+    messages = list(outgoing_sms_queue)
+    outgoing_sms_queue.clear()
     print(f"📤 Serving {len(messages)} SMS messages to SMSSync.")
     return jsonify({"payload": {"success": True, "task": messages}})
 
+# SMSSync Delivery Report Format (optional):
+"""
+SMSSync ➡️ Server (POST delivery status)
+
+Payload structure:
+{
+    "secret": "your_webhook_secret",   # Your SMSSync secret
+    "event": "message_status",         # Constant
+    "status": "SENT",                  # One of: SENT, QUEUED, FAILED
+    "uuid": "msg-uuid-123"             # Matches `uuid` in the fetch payload
+}
+"""
 
 # Send message to Discord from SMS
 async def send_to_discord(resolved, msg):
