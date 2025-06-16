@@ -118,8 +118,8 @@ def incoming():
 
 def receive_sms():
     data = request.form
-    from_number = data.get("sender")       # SMSSync default param for sender
-    content = data.get("message")          # SMSSync default param for message
+    from_number = data.get("from")        # SMSSync default sender param
+    content = data.get("message")         # SMSSync default message param
 
     if from_number not in ALLOWED_NUMBERS:
         return "Forbidden", 403
