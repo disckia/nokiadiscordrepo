@@ -114,26 +114,31 @@ def incoming():
     print("Headers:", request.headers)
     print("Body:", request.form)
     print("SMS received:", request.form)
-    result = receive_sms()
-    return result, 'OK', 200
+
+    return receive_sms()
+
 
 def receive_sms():
     data = request.form
-    from_number = data.get("from")        # SMSSync default sender param
-    content = data.get("message")         # SMSSync default message param
+    from_number = data.get("from")
+    content = data.get("message")
+
+    if not from_number or not content:
+        return ("Missing required fields", 400)
 
     if from_number not in ALLOWED_NUMBERS:
-        return "Forbidden", 403
+        return ("Forbidden", 403)
 
-    if not content or " " not in content:
-        return "Invalid format. Use: target message", 400
+    if " " not in content:
+        return ("Invalid format. Use: target message", 400)
 
     target, msg = content.split(" ", 1)
     target = target.lstrip("@")
     resolved = NUMBER_MAP.get(target, target)
 
     asyncio.run_coroutine_threadsafe(send_to_discord(resolved, msg), client.loop)
-    return "Message accepted", 200
+
+    return ("Message accepted", 200)
 
 # Start Flask in thread
 def start_flask():
