@@ -95,16 +95,17 @@ def receive_sms():
     return ("Message accepted", 200)
 
 # SMSSync fetches messages to send to Nokia
-@app.route("/fetch", methods=["GET", "POST"])
+@app.route("/fetch", methods=["POST"])
 def fetch_messages():
+    global outgoing_sms_queue
     if not outgoing_sms_queue:
         return jsonify({"payload": {"success": True, "task": []}})
 
-    messages = list(outgoing_sms_queue)
-    outgoing_sms_queue.clear()
-
+    messages = outgoing_sms_queue[:]
+    outgoing_sms_queue = []  # Clear after copying
     print(f"📤 Serving {len(messages)} SMS messages to SMSSync.")
     return jsonify({"payload": {"success": True, "task": messages}})
+
 
 # Send message to Discord from SMS
 async def send_to_discord(resolved, msg):
