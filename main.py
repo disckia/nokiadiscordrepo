@@ -114,7 +114,7 @@ def incoming():
     print("Headers:", request.headers)
     print("Body:", request.form)
     print("SMS received:", request.form)
-    return 'OK', 200
+    return receive_sms(), 'OK', 200
 
 def receive_sms():
     data = request.form
