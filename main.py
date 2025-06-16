@@ -6,6 +6,7 @@ from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 import asyncio
 from threading import Thread
+from collections import deque
 
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
@@ -36,7 +37,7 @@ client = discord.Client(intents=intents)
 discord_ready = asyncio.Event()
 
 # Outgoing message queue for SMSSync
-outgoing_sms_queue = []
+outgoing_sms_queue = deque()
 
 # Discord events
 @client.event
@@ -65,11 +66,8 @@ async def on_message(message):
         print("❌ TARGET_PHONE_NUMBER not set.")
 
 # Incoming webhook from SMSSync (POST only)
-@app.route("/incoming", methods=["POST", "GET"])
+@app.route("/incoming", methods=["POST"])
 def incoming():
-    if request.method == "GET":
-        return "This endpoint only accepts POST", 405
-
     print("Headers:", request.headers)
     print("Body:", request.form)
     return receive_sms()
@@ -99,12 +97,11 @@ def receive_sms():
 # SMSSync fetches messages to send to Nokia
 @app.route("/fetch", methods=["GET", "POST"])
 def fetch_messages():
-    global outgoing_sms_queue
     if not outgoing_sms_queue:
         return jsonify({"payload": {"success": True, "task": []}})
 
-    messages = outgoing_sms_queue[:]
-    outgoing_sms_queue = []
+    messages = list(outgoing_sms_queue)
+    outgoing_sms_queue.clear()
 
     print(f"📤 Serving {len(messages)} SMS messages to SMSSync.")
     return jsonify({"payload": {"success": True, "task": messages}})
