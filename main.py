@@ -109,6 +109,13 @@ async def send_to_discord(resolved, msg):
 
 # Flask route for incoming SMS from SMSSync (uses 'sender' and 'message')
 @app.route("/incoming", methods=["POST"])
+
+def incoming():
+    print("Headers:", request.headers)
+    print("Body:", request.form)
+    print("SMS received:", request.form)
+    return 'OK', 200
+
 def receive_sms():
     data = request.form
     from_number = data.get("sender")       # SMSSync default param for sender
