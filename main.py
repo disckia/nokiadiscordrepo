@@ -95,7 +95,7 @@ def receive_sms():
     return ("Message accepted", 200)
 
 # SMSSync fetches messages to send to Nokia
-@app.route("/fetch", methods=["POST"])
+@app.route("/fetch", methods=["PUT"])
 def fetch_messages():
     global outgoing_sms_queue
     if not outgoing_sms_queue:
