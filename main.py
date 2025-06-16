@@ -2,7 +2,7 @@ import os
 import json
 import discord
 import requests
-from flask import Flask, request
+from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 import asyncio
 from threading import Thread
@@ -22,6 +22,9 @@ except Exception as e:
     print(f"❌ Invalid NUMBER_MAP: {e}")
     NUMBER_MAP = {}
 
+# Target phone for SMS delivery (Nokia)
+TARGET_PHONE_NUMBER = os.getenv("TARGET_PHONE_NUMBER")
+
 # Flask app
 app = Flask(__name__)
 
@@ -32,26 +35,8 @@ intents.dm_messages = True
 client = discord.Client(intents=intents)
 discord_ready = asyncio.Event()
 
-# Function to send SMS by calling SMSSync API (Android phone SMS sending)
-def send_sms_via_smssync(to_number, message):
-    # SMSSync doesn't provide an official API, but some forks do HTTP GET to send SMS
-    # Replace this URL with your Android device's SMSSync endpoint and parameters
-    smssync_url = os.getenv("SMSSYNC_SEND_URL")  # e.g. "http://android_phone_ip:port/send_sms"
-    if not smssync_url:
-        print("❌ SMSSync send URL not set in environment variables.")
-        return
-    payload = {
-        "phone": to_number,
-        "message": message
-    }
-    try:
-        r = requests.get(smssync_url, params=payload, timeout=10)
-        if r.status_code == 200:
-            print(f"📤 SMS sent via SMSSync to {to_number}: {message}")
-        else:
-            print(f"❌ SMSSync send failed {r.status_code}: {r.text}")
-    except Exception as e:
-        print(f"❌ Exception sending SMS via SMSSync: {e}")
+# Outgoing message queue for SMSSync
+outgoing_sms_queue = []
 
 # Discord events
 @client.event
@@ -63,60 +48,31 @@ async def on_ready():
 async def on_message(message):
     if message.author == client.user:
         return
-    # Compose SMS content to send
+
+    # Compose message
     if isinstance(message.channel, discord.DMChannel):
         content = f"[DM] {message.author.name}: {message.content}"
     else:
         content = f"[#{message.channel.name}] {message.author.name}: {message.content}"
 
-    # Send SMS to the target phone number (your Nokia)
-    target_number = os.getenv("TARGET_PHONE_NUMBER")
-    if target_number:
-        # Send SMS in a background thread to not block the event loop
-        def send_sms_thread():
-            send_sms_via_smssync(target_number, content)
-        Thread(target=send_sms_thread).start()
+    if TARGET_PHONE_NUMBER:
+        print(f"📥 Queuing SMS to {TARGET_PHONE_NUMBER}: {content}")
+        outgoing_sms_queue.append({
+            "to": TARGET_PHONE_NUMBER,
+            "message": content
+        })
     else:
-        print("❌ TARGET_PHONE_NUMBER not set in environment variables.")
+        print("❌ TARGET_PHONE_NUMBER not set.")
 
-# Send message to Discord from SMS content
-async def send_to_discord(resolved, msg):
-    await discord_ready.wait()
-    try:
-        if resolved.isdigit():
-            channel = client.get_channel(int(resolved))
-            if channel and isinstance(channel, (discord.TextChannel, discord.Thread)):
-                await channel.send(msg)
-                print(f"📤 Sent to channel #{channel.name} (ID: {resolved})")
-                return
-
-            user = await client.fetch_user(int(resolved))
-            await user.send(msg)
-            print(f"📤 Sent DM to user {user.name} (ID: {resolved})")
-            return
-        else:
-            for guild in client.guilds:
-                channel = discord.utils.get(guild.channels, name=resolved)
-                if channel and isinstance(channel, (discord.TextChannel, discord.Thread)):
-                    await channel.send(msg)
-                    print(f"📤 Sent to channel #{channel.name} (by name)")
-                    return
-
-        print(f"❌ Could not find a suitable channel or user: {resolved}")
-
-    except Exception as e:
-        print(f"❌ Error sending to Discord: {e}")
-
-# Flask route for incoming SMS from SMSSync (uses 'sender' and 'message')
-@app.route("/incoming", methods=["POST"])
-
+# Incoming webhook from SMSSync (POST only)
+@app.route("/incoming", methods=["POST", "GET"])
 def incoming():
+    if request.method == "GET":
+        return "This endpoint only accepts POST", 405
+
     print("Headers:", request.headers)
     print("Body:", request.form)
-    print("SMS received:", request.form)
-
     return receive_sms()
-
 
 def receive_sms():
     data = request.form
@@ -139,6 +95,47 @@ def receive_sms():
     asyncio.run_coroutine_threadsafe(send_to_discord(resolved, msg), client.loop)
 
     return ("Message accepted", 200)
+
+# SMSSync fetches messages to send to Nokia
+@app.route("/fetch", methods=["GET", "POST"])
+def fetch_messages():
+    global outgoing_sms_queue
+    if not outgoing_sms_queue:
+        return jsonify({"payload": {"success": True, "task": []}})
+
+    messages = outgoing_sms_queue[:]
+    outgoing_sms_queue = []
+
+    print(f"📤 Serving {len(messages)} SMS messages to SMSSync.")
+    return jsonify({"payload": {"success": True, "task": messages}})
+
+# Send message to Discord from SMS
+async def send_to_discord(resolved, msg):
+    await discord_ready.wait()
+    try:
+        if resolved.isdigit():
+            channel = client.get_channel(int(resolved))
+            if channel and isinstance(channel, (discord.TextChannel, discord.Thread)):
+                await channel.send(msg)
+                print(f"📤 Sent to channel #{channel.name} (ID: {resolved})")
+                return
+
+            user = await client.fetch_user(int(resolved))
+            await user.send(msg)
+            print(f"📤 Sent DM to user {user.name} (ID: {resolved})")
+            return
+        else:
+            for guild in client.guilds:
+                channel = discord.utils.get(guild.channels, name=resolved)
+                if channel and isinstance(channel, (discord.TextChannel, discord.Thread)):
+                    await channel.send(msg)
+                    print(f"📤 Sent to channel #{channel.name} (by name)")
+                    return
+
+        print(f"❌ Could not find channel or user: {resolved}")
+
+    except Exception as e:
+        print(f"❌ Error sending to Discord: {e}")
 
 # Start Flask in thread
 def start_flask():
