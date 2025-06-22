@@ -1,3 +1,4 @@
+
 import os
 import json
 import discord
@@ -7,7 +8,6 @@ from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 import asyncio
 from threading import Thread
-from collections import deque
 
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
@@ -16,6 +16,9 @@ asyncio.set_event_loop(loop)
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ALLOWED_NUMBERS = os.getenv("ALLOWED_NUMBERS", "").split(",")
+PROJECT_ID = os.getenv("TELERIVET_PROJECT_ID")
+API_KEY = os.getenv("TELERIVET_API_KEY")
+PHONE_ID = os.getenv("TELERIVET_PHONE_ID")
 
 # Safe-load mapping for target names or IDs
 try:
@@ -24,7 +27,7 @@ except Exception as e:
     print(f"❌ Invalid NUMBER_MAP: {e}")
     NUMBER_MAP = {}
 
-# Target phone for SMS delivery (Nokia)
+# Target phone for SMS delivery
 TARGET_PHONE_NUMBER = os.getenv("TARGET_PHONE_NUMBER")
 
 # Flask app
@@ -36,26 +39,6 @@ intents.message_content = True
 intents.dm_messages = True
 client = discord.Client(intents=intents)
 discord_ready = asyncio.Event()
-
-# Outgoing message queue for SMSSync
-outgoing_sms_queue = deque()
-
-# SMSSync Incoming Payload Format:
-"""
-SMSSync ➡️ Server (POST to /incoming)
-
-Expected `request.form` structure:
-{
-    "secret": "your_webhook_secret",         # Required and should match what you set in the app
-    "from": "+1234567890",                   # Sender's number (the one who sent SMS)
-    "message": "target_name your message",   # SMS content (parsed to Discord)
-    "sent_timestamp": "1623345600000",       # When the sender sent the SMS (epoch millis)
-    "timestamp": "1623345600123",            # When SMSSync received the SMS (epoch millis)
-    "sent_to": "+19876543210",               # Your Android's SIM number
-    "device_id": "my_android_device_id",     # Optional identifier for device
-    "message_id": "123456789"                # Internal SMSSync message ID
-}
-"""
 
 # Discord events
 @client.event
@@ -75,26 +58,30 @@ async def on_message(message):
         content = f"[#{message.channel.name}] {message.author.name}: {message.content}"
 
     if TARGET_PHONE_NUMBER:
-        print(f"📥 Queuing SMS to {TARGET_PHONE_NUMBER}: {content}")
-        outgoing_sms_queue.append({
-            "to": TARGET_PHONE_NUMBER,
-            "message": content,
-            "uuid": str(uuid.uuid4())
-        })
+        print(f"📥 Sending SMS to {TARGET_PHONE_NUMBER}: {content}")
+        send_sms_via_telerivet(TARGET_PHONE_NUMBER, content)
     else:
         print("❌ TARGET_PHONE_NUMBER not set.")
 
-# Incoming webhook from SMSSync (POST only)
+# Send SMS via Telerivet API
+def send_sms_via_telerivet(to_number, message):
+    url = f"https://api.telerivet.com/v1/projects/{PROJECT_ID}/messages/send"
+    payload = {
+        "to": to_number,
+        "content": message,
+        "phone_id": PHONE_ID
+    }
+    response = requests.post(url, auth=(API_KEY, ""), data=payload)
+    print("📤 Telerivet response:", response.status_code, response.text)
+
+# Webhook to receive SMS from Telerivet (Telerivet service must post here)
 @app.route("/incoming", methods=["POST"])
 def incoming():
-    print("Headers:", request.headers)
-    print("Body:", request.form)
-    return receive_sms()
+    data = request.json
+    print("📩 Incoming SMS:", data)
 
-def receive_sms():
-    data = request.form
-    from_number = data.get("from")
-    content = data.get("message")
+    from_number = data.get("from_number")
+    content = data.get("content")
 
     if not from_number or not content:
         return ("Missing required fields", 400)
@@ -112,50 +99,6 @@ def receive_sms():
     asyncio.run_coroutine_threadsafe(send_to_discord(resolved, msg), client.loop)
 
     return ("Message accepted", 200)
-
-# SMSSync Fetch Format:
-"""
-Server ➡️ SMSSync (SMSSync sends PUT to /fetch)
-
-Your server must respond with:
-{
-    "payload": {
-        "success": true,
-        "task": [
-            {
-                "to": "+1234567890",          # Recipient phone number
-                "message": "Hello World",     # Content to send via SMS
-                "uuid": "msg-uuid-123"        # Unique ID for tracking status
-            },
-            ...
-        ]
-    }
-}
-"""
-
-@app.route("/fetch", methods=["PUT"])
-def fetch_messages():
-    global outgoing_sms_queue
-    if not outgoing_sms_queue:
-        return jsonify({"payload": {"success": True, "task": []}})
-
-    messages = list(outgoing_sms_queue)
-    outgoing_sms_queue.clear()
-    print(f"📤 Serving {len(messages)} SMS messages to SMSSync.")
-    return jsonify({"payload": {"success": True, "task": messages}})
-
-# SMSSync Delivery Report Format (optional):
-"""
-SMSSync ➡️ Server (POST delivery status)
-
-Payload structure:
-{
-    "secret": "your_webhook_secret",   # Your SMSSync secret
-    "event": "message_status",         # Constant
-    "status": "SENT",                  # One of: SENT, QUEUED, FAILED
-    "uuid": "msg-uuid-123"             # Matches `uuid` in the fetch payload
-}
-"""
 
 # Send message to Discord from SMS
 async def send_to_discord(resolved, msg):
