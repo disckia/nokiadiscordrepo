@@ -77,18 +77,16 @@ def send_sms_via_telerivet(to_number, message):
 # Webhook to receive SMS from Telerivet (Telerivet service must post here)
 @app.route("/incoming", methods=["POST"])
 def incoming():
-    data = request.json
+    try:
+        data = request.get_json(force=True) or request.form.to_dict()
+    except:
+        return "Invalid content", 415
+
     print("📩 Incoming SMS:", data)
-
-    from_number = data.get("from_number")
-    content = data.get("content")
-
-    if not from_number or not content:
-        return ("Missing required fields", 400)
-
-    if from_number not in ALLOWED_NUMBERS:
-        return ("Forbidden", 403)
     
+    from_number = data.get("from_number") or data.get("from")
+    content = data.get("content") or data.get("message")
+
 def index():
     return "Bot is online! 🚀"
 
