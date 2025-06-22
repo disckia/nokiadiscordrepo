@@ -88,6 +88,10 @@ def incoming():
 
     if from_number not in ALLOWED_NUMBERS:
         return ("Forbidden", 403)
+    
+def index():
+    return "Bot is online! 🚀"
+
 
     if " " not in content:
         return ("Invalid format. Use: target message", 400)
