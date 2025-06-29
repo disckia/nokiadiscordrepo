@@ -73,7 +73,7 @@ def send_sms_via_telerivet(to_number, message):
     }
 
     headers = {
-        'Content-Type': 'application/x-www-form-urlencoded'
+        'Content-Type': 'application/json'  # Corrected to application/json
     }
 
     max_retries = 3
@@ -82,7 +82,7 @@ def send_sms_via_telerivet(to_number, message):
 
     for attempt in range(max_retries):
         try:
-            response = requests.post(url, auth=(API_KEY, ""), data=payload, headers=headers, timeout=timeout)
+            response = requests.post(url, auth=(API_KEY, ""), json=payload, headers=headers, timeout=timeout)
             if response.status_code == 200:
                 print("📤 SMS sent successfully!")
                 return
@@ -130,6 +130,9 @@ def incoming():
 
         return ("Message accepted", 200)
 
+    except KeyError as e:
+        print(f"❌ Missing expected key in incoming data: {e}")
+        return "Bad request", 400
     except Exception as e:
         print(f"❌ Error processing incoming data: {e}")
         return "Internal server error", 500
@@ -165,7 +168,7 @@ async def send_to_discord(resolved, msg):
 # Start Flask in thread
 def start_flask():
     port = int(os.getenv("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port, use_reloader=False)
 
 if __name__ == "__main__":
     Thread(target=start_flask).start()
