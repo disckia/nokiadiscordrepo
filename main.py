@@ -1,4 +1,3 @@
-
 import os
 import json
 import discord
@@ -8,6 +7,7 @@ from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 import asyncio
 from threading import Thread
+import time
 
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
@@ -63,7 +63,7 @@ async def on_message(message):
     else:
         print("❌ TARGET_PHONE_NUMBER not set.")
 
-# Send SMS via Telerivet API
+# Send SMS via Telerivet API with increased timeout and retries
 def send_sms_via_telerivet(to_number, message):
     url = f"https://api.telerivet.com/v1/projects/{PROJECT_ID}/messages/send"
     payload = {
@@ -71,8 +71,27 @@ def send_sms_via_telerivet(to_number, message):
         "content": message,
         "phone_id": PHONE_ID
     }
-    response = requests.post(url, auth=(API_KEY, ""), data=payload)
-    print("📤 Telerivet response:", response.status_code, response.text)
+
+    max_retries = 3
+    retry_delay = 5  # Seconds
+    timeout = 30  # Increase timeout to 30 seconds
+
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(url, auth=(API_KEY, ""), data=payload, timeout=timeout)
+            if response.status_code == 200:
+                print("📤 SMS sent successfully!")
+                return
+            else:
+                print(f"❌ Telerivet error {response.status_code}: {response.text}")
+        except requests.exceptions.Timeout:
+            print(f"⏱️ Timeout error on attempt {attempt + 1}. Retrying in {retry_delay} seconds...")
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Request error: {e}")
+
+        time.sleep(retry_delay)  # Wait before retrying
+
+    print("❌ Failed to send SMS after retries.")
 
 # Webhook to receive SMS from Telerivet (Telerivet service must post here)
 @app.route("/incoming", methods=["POST"])
@@ -86,10 +105,6 @@ def incoming():
     
     from_number = data.get("from_number") or data.get("from")
     content = data.get("content") or data.get("message")
-
-def index():
-    return "Bot is online! 🚀"
-
 
     if " " not in content:
         return ("Invalid format. Use: target message", 400)
@@ -122,7 +137,7 @@ async def send_to_discord(resolved, msg):
                 channel = discord.utils.get(guild.channels, name=resolved)
                 if channel and isinstance(channel, (discord.TextChannel, discord.Thread)):
                     await channel.send(msg)
-                    print(f"📤 Sent to channel #{channel.name} (by name)")
+                    print(f"📤 Sent to channel #{channel.name} (by name) ")
                     return
 
         print(f"❌ Could not find channel or user: {resolved}")
