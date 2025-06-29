@@ -101,24 +101,31 @@ def send_sms_via_telerivet(to_number, message):
 @app.route("/incoming", methods=["POST"])
 def incoming():
     try:
+        # Log headers and raw data
+        print("Request Headers:", request.headers)
+        print("Raw Data:", request.data)
+
         # Force parsing JSON or fallback to form data if JSON is not available
         data = request.get_json(force=True) or request.form.to_dict()
 
         if not data:
+            print("❌ No data received or malformed request")
             return "Invalid content", 415
 
-        print("📩 Incoming SMS:", data)
+        print("📩 Incoming SMS data:", data)
 
         from_number = data.get("from_number") or data.get("from")
         content = data.get("content") or data.get("message")
 
-        if " " not in content:
+        if not content or " " not in content:
+            print(f"❌ Invalid format or missing content: {content}")
             return ("Invalid format. Use: target message", 400)
 
         target, msg = content.split(" ", 1)
         target = target.lstrip("@")
         resolved = NUMBER_MAP.get(target, target)
 
+        print(f"📤 Resolving target: {resolved} => {msg}")
         asyncio.run_coroutine_threadsafe(send_to_discord(resolved, msg), client.loop)
 
         return ("Message accepted", 200)
