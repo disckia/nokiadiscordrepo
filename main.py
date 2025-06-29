@@ -72,13 +72,17 @@ def send_sms_via_telerivet(to_number, message):
         "phone_id": PHONE_ID
     }
 
+    headers = {
+        'Content-Type': 'application/x-www-form-urlencoded'
+    }
+
     max_retries = 3
     retry_delay = 5  # Seconds
     timeout = 30  # Increase timeout to 30 seconds
 
     for attempt in range(max_retries):
         try:
-            response = requests.post(url, auth=(API_KEY, ""), data=payload, timeout=timeout)
+            response = requests.post(url, auth=(API_KEY, ""), data=payload, headers=headers, timeout=timeout)
             if response.status_code == 200:
                 print("📤 SMS sent successfully!")
                 return
@@ -97,25 +101,31 @@ def send_sms_via_telerivet(to_number, message):
 @app.route("/incoming", methods=["POST"])
 def incoming():
     try:
+        # Force parsing JSON or fallback to form data if JSON is not available
         data = request.get_json(force=True) or request.form.to_dict()
-    except:
-        return "Invalid content", 415
 
-    print("📩 Incoming SMS:", data)
-    
-    from_number = data.get("from_number") or data.get("from")
-    content = data.get("content") or data.get("message")
+        if not data:
+            return "Invalid content", 415
 
-    if " " not in content:
-        return ("Invalid format. Use: target message", 400)
+        print("📩 Incoming SMS:", data)
 
-    target, msg = content.split(" ", 1)
-    target = target.lstrip("@")
-    resolved = NUMBER_MAP.get(target, target)
+        from_number = data.get("from_number") or data.get("from")
+        content = data.get("content") or data.get("message")
 
-    asyncio.run_coroutine_threadsafe(send_to_discord(resolved, msg), client.loop)
+        if " " not in content:
+            return ("Invalid format. Use: target message", 400)
 
-    return ("Message accepted", 200)
+        target, msg = content.split(" ", 1)
+        target = target.lstrip("@")
+        resolved = NUMBER_MAP.get(target, target)
+
+        asyncio.run_coroutine_threadsafe(send_to_discord(resolved, msg), client.loop)
+
+        return ("Message accepted", 200)
+
+    except Exception as e:
+        print(f"❌ Error processing incoming data: {e}")
+        return "Internal server error", 500
 
 # Send message to Discord from SMS
 async def send_to_discord(resolved, msg):
@@ -137,7 +147,7 @@ async def send_to_discord(resolved, msg):
                 channel = discord.utils.get(guild.channels, name=resolved)
                 if channel and isinstance(channel, (discord.TextChannel, discord.Thread)):
                     await channel.send(msg)
-                    print(f"📤 Sent to channel #{channel.name} (by name) ")
+                    print(f"📤 Sent to channel #{channel.name} (by name)")
                     return
 
         print(f"❌ Could not find channel or user: {resolved}")
